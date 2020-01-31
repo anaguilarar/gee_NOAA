@@ -1,4 +1,5 @@
-##
+## todo: date is not compatible
+## TODO: CALENDAR RANGE MAKE THE QUERY PER DAYS
 
 import ee
 import numpy as np
@@ -8,7 +9,8 @@ ee.Initialize()
 
 NOAA_bands = ['Downward_Long-Wave_Radp_Flux_surface_6_Hour_Average', 'Downward_Short-Wave_Radiation_Flux_surface_6_Hour_Average',
               'Maximum_temperature_height_above_ground_6_Hour_Interval','Minimum_temperature_height_above_ground_6_Hour_Interval',
-              'Precipitation_rate_surface_6_Hour_Average', 'Specific_humidity_height_above_ground',
+              'Precipitation_rate_surface_6_Hour_Average', 'Pressure_surface',
+              'Potential_Evaporation_Rate_surface_6_Hour_Average','Specific_humidity_height_above_ground',
               'Upward_Long-Wave_Radp_Flux_surface_6_Hour_Average', 'Upward_Short-Wave_Radiation_Flux_surface_6_Hour_Average']
 ###
 def organice_coordinates(dataframe, longcolname="longitude", latcolname="latitude"):
@@ -26,8 +28,16 @@ def _reduce_regions(image,geometry):
     """Spatial aggregation function for a single image and a polygon feature"""
     image = ee.Image(image)
     stat_dict = image.reduceRegions(geometry,'mean',10);
-    return stat_dict.map(lambda y:
-                    y.set('date', image.get('system:index')))
+    return stat_dict#.map(lambda y: y.set('date', image.get('system:index')))
+
+def _get_dates(imagecol):
+    def _iter_func (image, newlist):
+        date = ee.Number.parse(image.date().format("YYYYMMdd"))
+        newlist = ee.List(newlist)
+
+        return ee.List(newlist.add(date).sort())
+
+    return imagecol.iterate(_iter_func, ee.List([])).getInfo()
 
 def get_dates(featurecol, colname = 'id'):
     """get dates from a feature collection"""
@@ -60,15 +70,23 @@ def extract_NOAA_data_pergeom(init_date, end_date, sp_features, bands = NOAA_ban
     ## mission data query
     imgcoll = ee.ImageCollection(satellite_mission).filterDate(init_date, end_date).select(bands);
     ## transform spatial data ee feature collection
+    
     ee_sp = ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
+
     ##extract data
-    dataextracted = imgcoll.map(lambda x: _reduce_regions(x, ee_sp)).flatten().getInfo()
-    bands.append('date')
+    dataextracted = imgcoll.map(lambda x: _reduce_regions(x, ee_sp))
+    dataextracted = dataextracted.flatten().getInfo()
+
+    #if 'date' not in bands:
+    #    bands.append('date')
+
     #dates = get_dates(dataextracted)
     ## get values
     band_values = pd.DataFrame(np.transpose(get_values(dataextracted, bands)), columns = bands)
+    #print(band_values.head())
+
     ## adding dates
-    #band_values['dates'] = dates
+    band_values['dates'] = _get_dates(imgcoll)*len(sp_features)
     ## add spatial coordinates
     band_values['longitude'], band_values['latitude'] = get_coordinates(dataextracted)
 
@@ -85,11 +103,11 @@ def _summarisedata(df, cumvars, avgvars):
 
 def summarise_noaa(noaadf, by = "days", averagecolumns = None, cummulativecolumns = None, noaabands = NOAA_bands.copy()):
     ##
-    noaabands = [x for x in noaabands if not x in ['date']]
+    noaabands = [x for x in noaabands if not x in ['dates']]
     ## add dates as a new column
-    noaadf["dates"] =  [i[:-2] for i in noaadf['date']]
-    noaadf['year_month'] = [str(i[:-6]) + "_" + i[-6:-4] for i in noaadf['date']]
-    noaadf['year'] = [i[:-6] for i in noaadf['date']]
+    noaadf['dates']
+    noaadf['year_month'] = [str(i)[:-4] + "_" + str(i)[-4:-2] for i in noaadf['dates']]
+    noaadf['year'] = [str(i)[:-4] for i in noaadf['dates']]
 
     ## convert str to numeric
     noaadf[noaabands] = noaadf.apply(lambda x: pd.to_numeric(x[noaabands]), axis=1)
