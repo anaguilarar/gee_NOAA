@@ -80,35 +80,100 @@ class gee_weatherdata:
                                                        self._mission,
                                                        self._ee_sp)
 
-    def _extract_data(self, bands, function='mean'):
+    def _extract_multifunction(self, ee_sp, bands):
+
+        if len(bands) == 4:
+            avgdata = self._extract_data(bands[0], ee_sp)
+            avgdata = fromeedict_todataframe(avgdata, bands[0])
+            print('average features processed')
+            sumdata = self._extract_data(bands[1], ee_sp, 'sum')
+            sumdata = fromeedict_todataframe(sumdata, bands[1])
+            print('cummulative features processed')
+            mindata = self._extract_data(bands[2], ee_sp, 'min')
+            mindata = fromeedict_todataframe(mindata, bands[2])
+            print('minimum features processed')
+            maxata = self._extract_data(bands[3], ee_sp, 'max')
+            maxata = fromeedict_todataframe(maxata, bands[3])
+            print('maximum features processed')
+
+            datasummarised = pd.concat([sumdata, avgdata,
+                                        maxata, mindata], axis=1)
+        else:
+            avgdata = self._extract_data(self._bands, ee_sp)
+            datasummarised = fromeedict_todataframe(avgdata,self._bands)
+
+        return datasummarised
+
+    def _extract_data(self, bands, ee_sp, function='mean'):
+
         if self._mission == 'NOAA/CFSV2/FOR6H':
             imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates, function)
         else:
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
 
-        dataextracted = imagecoll.map(lambda x: reduce_region(x, self._ee_sp))
+        dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
         dataextracted = dataextracted.flatten().getInfo()
+
         return dataextracted
+
+    def _extract_databypieces(self,  bands, steps=2):
+
+        dataextracted = []
+
+        for spoint in range(0, len(self.features), steps):
+            sp_features = organice_coordinates(self.features[spoint: spoint + steps])
+            ee_sp = ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
+
+            summarised = self._extract_multifunction(ee_sp, bands)
+            date = pd.Series(
+                getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'properties', 'date'))
+
+            if self._mission == 'NOAA/CFSV2/FOR6H':
+                summarised['date'] = date.apply(lambda x:
+                                                dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],'%Y-%m-%d'))
+
+            if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+                summarised['date'] = date
+
+            coords = pd.DataFrame(getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'geometry', 'coordinates'),
+                                  columns=['longitude', 'latitude'])
+                
+            dataextracted.append(pd.concat([summarised, coords], axis=1))
+
+            print("Points from {0} to {1} were extracted".format(spoint, (spoint + steps) - 1))
+
+        return pd.concat(dataextracted)
 
     def CHIRPSdata_asdf(self, by="days"):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
-            dataperday = self._extract_data(self._bands)
+            try:
+                dataperday = self._extract_data(self._bands, self._ee_sp)
 
-            date = pd.Series(getfeature_fromeedict(dataperday, 'properties', 'date'))
+                date = pd.Series(getfeature_fromeedict(dataperday, 'properties', 'date'))
 
-            coords = pd.DataFrame(getfeature_fromeedict(dataperday, 'geometry', 'coordinates'),
-                                  columns=['longitude', 'latitude'])
+                coords = pd.DataFrame(getfeature_fromeedict(dataperday, 'geometry', 'coordinates'),
+                                      columns=['longitude', 'latitude'])
 
-            df = fromeedict_todataframe(dataperday, self._bands)
-            df['date'] = date.apply(lambda date_i:
-                                    dt.datetime.strptime(date_i, '%Y%m%d'))
-            df = pd.concat([df, coords], axis=1)
+                df = fromeedict_todataframe(dataperday, self._bands)
+                df['date'] = date.apply(lambda date_i:
+                                        dt.datetime.strptime(date_i, '%Y%m%d'))
+                df = pd.concat([df, coords], axis=1)
+
+            except:
+                datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0],
+                                                                                                  "%Y-%m-%d")
+                step = int(np.round(5000 / datedif.days))
+                print(
+                    'generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
+                    .format(step))
+                df = self._extract_databypieces(self._bands, step)
+
             return df
 
-    def plot_CHIRPS(self, feature_index = 1, fig_size = [12,5]):
+    def plot_CHIRPS(self, feature_index=1, fig_size=[12, 5]):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
 
-            ref_long = self.features.longitude.loc[feature_index-1]
+            ref_long = self.features.longitude.loc[feature_index - 1]
             plotdata = self.CHIRPSdata_asdf()
             plotdata = plotdata.loc[np.round(plotdata.longitude, 5) == np.round(ref_long, 5)]
 
@@ -119,7 +184,6 @@ class gee_weatherdata:
             plt.title("longitude: {}; latitude: {}".format(np.round(ref_long, 4),
                                                            np.round(self.features.latitude.loc[feature_index], 4)))
             plt.show()
-
 
     def summarise_noaa(self,
                        averagecols=None,
@@ -134,37 +198,40 @@ class gee_weatherdata:
         ##TODO: create monthly and yearly module
         if by == "days":
             if cummulativecols is None and averagecols is None and minimumcols is None and maximumcols is None:
-                avgdata = self._extract_data(self._bands)
-
+                ee_sp = self._ee_sp
+                summarised = self._extract_multifunction(ee_sp, self._bands)
 
             else:
                 if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
-                    avgdata = self._extract_data(averagecols)
-                    avgdata = fromeedict_todataframe(avgdata, averagecols)
-                    print('average features processed')
-                    sumdata = self._extract_data(cummulativecols, 'sum')
-                    sumdata = fromeedict_todataframe(sumdata, cummulativecols)
-                    print('cummulative features processed')
-                    mindata = self._extract_data(minimumcols, 'min')
-                    mindata = fromeedict_todataframe(mindata, minimumcols)
-                    print('minimum features processed')
-                    maxata = self._extract_data(maximumcols, 'max')
-                    maxata = fromeedict_todataframe(maxata, maximumcols)
-                    print('maximum features processed')
+                    try:
+                        ee_sp = self._ee_sp
+                        summarised = self._extract_multifunction(ee_sp,
+                                                                 [averagecols, cummulativecols,
+                                                                  minimumcols, maximumcols])
+                        ee_sp = self._ee_sp
+                        date = pd.Series(
+                            getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'properties', 'date'))
 
-                    summarised = pd.concat([sumdata, avgdata,
-                                            maxata, mindata],
-                                           axis=1)
+                        summarised['date'] = date.apply(lambda x:
+                                                        dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
+                                                                                                         '%Y-%m-%d'))
 
-        date = pd.Series(getfeature_fromeedict(self._extract_data(averagecols), 'properties', 'date'))
+                        coords = pd.DataFrame(
+                            getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'geometry', 'coordinates'),
+                            columns=['longitude', 'latitude'])
 
-        summarised['date'] = date.apply(lambda date:
-                                        dt.timedelta(days=int(date)) + dt.datetime.strptime(self._dates[0],
-                                                                                            '%Y-%m-%d'))
-        coords = pd.DataFrame(getfeature_fromeedict(self._extract_data(averagecols), 'geometry', 'coordinates'),
-                              columns=['longitude', 'latitude'])
+                        summarised = pd.concat([summarised, coords], axis=1)
 
-        summarised = pd.concat([summarised, coords], axis=1)
+
+                    except:
+                        datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
+                        step = int(np.round(5000 / datedif.days))
+                        print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
+                              .format(step))
+                        summarised = self._extract_databypieces([averagecols, cummulativecols,
+                                                                 minimumcols, maximumcols], step)
+
+
 
         return summarised
 
@@ -229,6 +296,14 @@ def check_features(featurecoll, featurenames):
     return np.unique(featurenotinlist)
 
 
+def multiple_eedict_todf(eelistcollection, bands, colname='properties'):
+    featuresvalues = []
+    for i in range(len(eelistcollection)):
+        featuresvalues.append(fromeedict_todataframe(eelistcollection[i], bands, colname))
+
+    return pd.concat(featuresvalues, axis=1)
+
+
 def fromeedict_todataframe(featurecollection, bands, colname='properties'):
     """get band values from a feature collection"""
 
@@ -277,20 +352,22 @@ def read_pointsas_ee_sp(filename):
     sp_features = organice_coordinates(sp_features)
     return ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
 
-def read_pointsas_df(filename, colnames = ["longitude", "latitude"]):
+
+def read_pointsas_df(filename, colnames=["longitude", "latitude"]):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
     sp_features = pd.read_csv(filename)
     sp_features = organice_coordinates(sp_features)
-    sp_df = pd.DataFrame(sp_features, columns= colnames)
-    sp_df['index'] = [i+1 for i in range(len(sp_features))]
+    sp_df = pd.DataFrame(sp_features, columns=colnames)
+    sp_df['index'] = [i + 1 for i in range(len(sp_features))]
     return sp_df
 
 
 def organice_coordinates(dataframe, longcolname="longitude", latcolname="latitude"):
     '''organice the coordinates as long, lat per list'''
 
-    return [[dataframe[longcolname][row_i], dataframe[latcolname][row_i]] for row_i in range(dataframe.shape[0])]
+    return [[dataframe[longcolname].iloc[row_i], dataframe[latcolname].iloc[row_i]] for row_i in
+            range(dataframe.shape[0])]
 
 
 def reduce_region(image, geometry):
