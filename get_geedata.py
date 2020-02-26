@@ -137,14 +137,14 @@ class gee_weatherdata:
 
             coords = pd.DataFrame(getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'geometry', 'coordinates'),
                                   columns=['longitude', 'latitude'])
-                
+
             dataextracted.append(pd.concat([summarised, coords], axis=1))
 
             print("Points from {0} to {1} were extracted".format(spoint, (spoint + steps) - 1))
 
         return pd.concat(dataextracted)
 
-    def CHIRPSdata_asdf(self, by="days"):
+    def CHIRPSdata_asdf(self, by ="days"):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
             try:
                 dataperday = self._extract_data(self._bands, self._ee_sp)
