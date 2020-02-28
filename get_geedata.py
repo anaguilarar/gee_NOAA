@@ -17,6 +17,18 @@ NOAA_bands = ['Downward_Long-Wave_Radp_Flux_surface_6_Hour_Average',
               'Upward_Long-Wave_Radp_Flux_surface_6_Hour_Average',
               'Upward_Short-Wave_Radiation_Flux_surface_6_Hour_Average']
 
+GLDA_bands = ['AvgSurfT_inst',
+              'Tair_f_inst',
+              'SoilMoi0_10cm_inst',
+              'Evap_tavg',
+              'PotEvap_tavg',
+              'Lwnet_tavg',
+              'LWdown_f_tavg',
+              'Qair_f_inst',
+              'Psurf_f_inst',
+              'Rainf_f_tavg']
+
+
 
 class gee_weatherdata:
     """Download weathaer data from the Google Earth Engine platform.
@@ -63,10 +75,13 @@ class gee_weatherdata:
 
         ### mission reference setting
 
-        if (mission == "noaa"):
+        if mission == "noaa":
             self._mission = 'NOAA/CFSV2/FOR6H'
             self._bands = NOAA_bands
-        else:
+        if mission == 'gldas':
+            self._mission = 'NASA/GLDAS/V021/NOAH/G025/T3H'
+            self._bands = GLDA_bands
+        if mission == 'chirps':
             self._mission = 'UCSB-CHG/CHIRPS/DAILY'
             self._bands = ["precipitation"]
 
@@ -108,7 +123,9 @@ class gee_weatherdata:
 
         if self._mission == 'NOAA/CFSV2/FOR6H':
             imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates, function)
-        else:
+        if self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
+            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates, function)
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
 
         dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
@@ -129,6 +146,10 @@ class gee_weatherdata:
                 getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'properties', 'date'))
 
             if self._mission == 'NOAA/CFSV2/FOR6H':
+                summarised['date'] = date.apply(lambda x:
+                                                dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],'%Y-%m-%d'))
+
+            if self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
                 summarised['date'] = date.apply(lambda x:
                                                 dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],'%Y-%m-%d'))
 
@@ -185,51 +206,51 @@ class gee_weatherdata:
                                                            np.round(self.features.latitude.loc[feature_index], 4)))
             plt.show()
 
-    def summarise_noaa(self,
+    def summarise_hourlydata(self,
                        averagecols=None,
                        cummulativecols=None,
                        minimumcols=None,
                        maximumcols=None,
                        by="days"):
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission =='NASA/GLDAS/V021/NOAH/G025/T3H':
+            '''resume noaa  and gldas data per a specific period'''
 
-        '''resume noaa data per a specific time'''
+            ### group data by days
+            ##TODO: create monthly and yearly module
+            if by == "days":
+                if cummulativecols is None and averagecols is None and minimumcols is None and maximumcols is None:
+                    ee_sp = self._ee_sp
+                    summarised = self._extract_multifunction(ee_sp, self._bands)
 
-        ### group data by days
-        ##TODO: create monthly and yearly module
-        if by == "days":
-            if cummulativecols is None and averagecols is None and minimumcols is None and maximumcols is None:
-                ee_sp = self._ee_sp
-                summarised = self._extract_multifunction(ee_sp, self._bands)
+                else:
+                    if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
+                        try:
+                            ee_sp = self._ee_sp
+                            summarised = self._extract_multifunction(ee_sp,
+                                                                     [averagecols, cummulativecols,
+                                                                      minimumcols, maximumcols])
+                            ee_sp = self._ee_sp
+                            date = pd.Series(
+                                getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'properties', 'date'))
 
-            else:
-                if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
-                    try:
-                        ee_sp = self._ee_sp
-                        summarised = self._extract_multifunction(ee_sp,
-                                                                 [averagecols, cummulativecols,
-                                                                  minimumcols, maximumcols])
-                        ee_sp = self._ee_sp
-                        date = pd.Series(
-                            getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'properties', 'date'))
+                            summarised['date'] = date.apply(lambda x:
+                                                            dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
+                                                                                                             '%Y-%m-%d'))
 
-                        summarised['date'] = date.apply(lambda x:
-                                                        dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
-                                                                                                         '%Y-%m-%d'))
+                            coords = pd.DataFrame(
+                                getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'geometry', 'coordinates'),
+                                columns=['longitude', 'latitude'])
 
-                        coords = pd.DataFrame(
-                            getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'geometry', 'coordinates'),
-                            columns=['longitude', 'latitude'])
-
-                        summarised = pd.concat([summarised, coords], axis=1)
+                            summarised = pd.concat([summarised, coords], axis=1)
 
 
-                    except:
-                        datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
-                        step = int(np.round(5000 / datedif.days))
-                        print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
-                              .format(step))
-                        summarised = self._extract_databypieces([averagecols, cummulativecols,
-                                                                 minimumcols, maximumcols], step)
+                        except:
+                            datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
+                            step = int(np.round(5000 / datedif.days))
+                            print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
+                                  .format(step))
+                            summarised = self._extract_databypieces([averagecols, cummulativecols,
+                                                                     minimumcols, maximumcols], step)
 
 
 
