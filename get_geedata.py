@@ -246,7 +246,8 @@ class gee_weatherdata:
 
                         except:
                             datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
-                            step = int(np.round(5000 / datedif.days))
+                            step = int(np.floor(4900 / datedif.days))
+
                             print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
                                   .format(step))
                             summarised = self._extract_databypieces([averagecols, cummulativecols,
