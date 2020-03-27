@@ -279,17 +279,23 @@ class gee_weatherdata:
                             summarised = self._extract_databypieces([averagecols, cummulativecols,
                                                                      minimumcols, maximumcols], featuresreduced, step)
 
-                            alldata = []
-                            ### assign values to the repeated features
-                            for i in listindex:
-                                pddata = np.transpose(pd.DataFrame(summarised.iloc[i[0]].values))
-                                newdf = pd.DataFrame(np.repeat(pddata.values, len(i), axis=0))
-                                newdf.columns = summarised.columns
-                                newdf.index = i
-                                alldata.append(newdf)
-                            alldata = pd.concat(alldata)
-                            summarised = alldata.sort_index(axis=0)
+                            idcoords = [str(summarised.longitude.values[i]) + str(summarised.latitude.values[i]) for i in
+                                        range(len(summarised.latitude.values))]
 
+                            dataaux = []
+                            for j in range(len(listindex)):
+                                alldata = []
+                                refpos = str(featuresreduced.longitude.values[j]) + str(featuresreduced.latitude.values[j])
+                                pddata = summarised.loc[np.array(idcoords) == refpos]
+                                ### assign values to the repeated features
+                                for i in listindex[j]:
+                                    pddata.longitude = self.features.iloc[i].longitude
+                                    pddata.latitude = self.features.iloc[i].latitude
+                                    alldata.append(pddata)
+
+                                dataaux.append(pd.concat(alldata))
+
+                            summarised = pd.concat(dataaux)
 
         return summarised
 
