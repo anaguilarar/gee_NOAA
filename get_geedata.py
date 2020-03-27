@@ -1,9 +1,12 @@
 import ee
+import functools
+import operator
 import numpy as np
 import pandas as pd
 import datetime as dt
 import matplotlib.pyplot as plt
 
+## TODO: check if multiple points are located in the same pixel
 ee.Initialize()
 
 NOAA_bands = ['Downward_Long-Wave_Radp_Flux_surface_6_Hour_Average',
@@ -33,7 +36,7 @@ GLDA_bands = ['AvgSurfT_inst',
 class gee_weatherdata:
     """Download weathaer data from the Google Earth Engine platform.
 
-           the final output will be table in which the user can quaery the weather data foor especifical spatial point throughout time.
+           the final output will be a table in which the user can quaery the weather data foor especifical spatial point throughout time.
 
 
            Parameters
@@ -69,9 +72,7 @@ class gee_weatherdata:
     def __init__(self, start_date,
                  end_date,
                  roi_filename,
-                 mission,
-                 output_path=None,
-                 bands=None):
+                 mission):
 
         ### mission reference setting
 
@@ -99,25 +100,25 @@ class gee_weatherdata:
 
         if len(bands) == 4:
             avgdata = self._extract_data(bands[0], ee_sp)
-            avgdata = fromeedict_todataframe(avgdata, bands[0])
+            dfavgdata = fromeedict_todataframe(avgdata, bands[0])
             print('average features processed')
             sumdata = self._extract_data(bands[1], ee_sp, 'sum')
-            sumdata = fromeedict_todataframe(sumdata, bands[1])
+            dfsumdata = fromeedict_todataframe(sumdata, bands[1])
             print('cummulative features processed')
             mindata = self._extract_data(bands[2], ee_sp, 'min')
-            mindata = fromeedict_todataframe(mindata, bands[2])
+            dfmindata = fromeedict_todataframe(mindata, bands[2])
             print('minimum features processed')
             maxata = self._extract_data(bands[3], ee_sp, 'max')
-            maxata = fromeedict_todataframe(maxata, bands[3])
+            dfmaxata = fromeedict_todataframe(maxata, bands[3])
             print('maximum features processed')
 
-            datasummarised = pd.concat([sumdata, avgdata,
-                                        maxata, mindata], axis=1)
+            datasummarised = pd.concat([dfsumdata, dfavgdata,
+                                        dfmaxata, dfmindata], axis=1)
         else:
             avgdata = self._extract_data(self._bands, ee_sp)
             datasummarised = fromeedict_todataframe(avgdata,self._bands)
 
-        return datasummarised
+        return [datasummarised, avgdata]
 
     def _extract_data(self, bands, ee_sp, function='mean'):
 
@@ -133,33 +134,37 @@ class gee_weatherdata:
 
         return dataextracted
 
-    def _extract_databypieces(self,  bands, steps=2):
+    def _get_dates_coordinatesfromee(self, geedict):
+
+        date = pd.Series(
+            getfeature_fromeedict(geedict, 'properties', 'date'))
+
+        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
+            dates = date.apply(lambda x:
+                                            dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
+                                                                                             '%Y-%m-%d'))
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+            dates = date
+
+        coords = pd.DataFrame(getfeature_fromeedict(geedict, 'geometry', 'coordinates'),
+                              columns=['longitude', 'latitude'])
+
+        return [dates, coords]
+
+    def _extract_databypieces(self,  bands, features, steps=2):
 
         dataextracted = []
 
-        for spoint in range(0, len(self.features), steps):
-            sp_features = organice_coordinates(self.features[spoint: spoint + steps])
+        for spoint in range(0, len(features), steps):
+            sp_features = organice_coordinates(features[spoint: spoint + steps])
             ee_sp = ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
 
-            summarised = self._extract_multifunction(ee_sp, bands)
-            date = pd.Series(
-                getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'properties', 'date'))
+            summarised, eedict = self._extract_multifunction(ee_sp, bands)
 
-            if self._mission == 'NOAA/CFSV2/FOR6H':
-                summarised['date'] = date.apply(lambda x:
-                                                dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],'%Y-%m-%d'))
+            date, coordinates = self._get_dates_coordinatesfromee(eedict)
+            summarised['date'] = date
 
-            if self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
-                summarised['date'] = date.apply(lambda x:
-                                                dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],'%Y-%m-%d'))
-
-            if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
-                summarised['date'] = date
-
-            coords = pd.DataFrame(getfeature_fromeedict(self._extract_data(bands[0], ee_sp), 'geometry', 'coordinates'),
-                                  columns=['longitude', 'latitude'])
-
-            dataextracted.append(pd.concat([summarised, coords], axis=1))
+            dataextracted.append(pd.concat([summarised, coordinates], axis=1))
 
             print("Points from {0} to {1} were extracted".format(spoint, (spoint + steps) - 1))
 
@@ -185,7 +190,7 @@ class gee_weatherdata:
                                                                                                   "%Y-%m-%d")
                 step = int(np.round(5000 / datedif.days))
                 print(
-                    'generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
+                    'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
                     .format(step))
                 df = self._extract_databypieces(self._bands, step)
 
@@ -206,6 +211,32 @@ class gee_weatherdata:
                                                            np.round(self.features.latitude.loc[feature_index], 4)))
             plt.show()
 
+    def check_duplicatedvalues(self):
+        """
+        query data in gee for two dates only, just to check which coordinades share similar data
+        :return:
+        """
+        ee_sp = self._ee_sp
+
+        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
+            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(self._bands), [ee.Date(self._dates[0]),ee.Date(self._dates[0]).advance(1, 'day')], 'mean')
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[1])).select(self._bands)
+
+        dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
+        dataextracted = dataextracted.flatten().getInfo()
+
+        summarised = fromeedict_todataframe(dataextracted, self._bands)
+        date, coordinates = self._get_dates_coordinatesfromee(dataextracted)
+        summarised['date'] = date
+        summarised = summarised.loc[summarised.date == summarised.date.values[0]]
+
+        listduplicated = find_duplicatedvaleus(summarised[self._bands].mean(axis=1))
+
+        return [listduplicated, self.features.iloc[[x[0] for x in listduplicated]]]
+
+
+
     def summarise_hourlydata(self,
                        averagecols=None,
                        cummulativecols=None,
@@ -217,6 +248,9 @@ class gee_weatherdata:
 
             ### group data by days
             ##TODO: create monthly and yearly module
+
+            ### due to the pixel size some features will have same values, so the code will download only one value for multiple features
+
             if by == "days":
                 if cummulativecols is None and averagecols is None and minimumcols is None and maximumcols is None:
                     ee_sp = self._ee_sp
@@ -226,53 +260,65 @@ class gee_weatherdata:
                     if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
                         try:
                             ee_sp = self._ee_sp
-                            summarised = self._extract_multifunction(ee_sp,
-                                                                     [averagecols, cummulativecols,
-                                                                      minimumcols, maximumcols])
-                            ee_sp = self._ee_sp
-                            date = pd.Series(
-                                getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'properties', 'date'))
 
-                            summarised['date'] = date.apply(lambda x:
-                                                            dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
-                                                                                                             '%Y-%m-%d'))
-
-                            coords = pd.DataFrame(
-                                getfeature_fromeedict(self._extract_data(averagecols, ee_sp), 'geometry', 'coordinates'),
-                                columns=['longitude', 'latitude'])
-
-                            summarised = pd.concat([summarised, coords], axis=1)
+                            summarised, eedict = self._extract_multifunction(ee_sp, [averagecols, cummulativecols,
+                                                                                    minimumcols, maximumcols])
+                            date, coordinates = self._get_dates_coordinatesfromee(eedict)
+                            summarised['date'] = date
+                            summarised = pd.concat([summarised, coordinates], axis=1)
 
 
                         except:
+                            ### Looking for those points that have repeated information
+                            listindex, featuresreduced = self.check_duplicatedvalues()
                             datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
                             step = int(np.floor(4900 / datedif.days))
 
                             print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
                                   .format(step))
                             summarised = self._extract_databypieces([averagecols, cummulativecols,
-                                                                     minimumcols, maximumcols], step)
+                                                                     minimumcols, maximumcols], featuresreduced, step)
 
+                            alldata = []
+                            ### assign values to the repeated features
+                            for i in listindex:
+                                pddata = np.transpose(pd.DataFrame(summarised.iloc[i[0]].values))
+                                newdf = pd.DataFrame(np.repeat(pddata.values, len(i), axis=0))
+                                newdf.columns = summarised.columns
+                                newdf.index = i
+                                alldata.append(newdf)
+                            alldata = pd.concat(alldata)
+                            summarised = alldata.sort_index(axis=0)
 
 
         return summarised
 
 
-'''
-            if cummulativecolumns is not None:
-                averagecolumns = [x for x in self._bands if not x in cummulativecolumns]
-                bydays_cumm = self._imagecollection_fromlistiteration(cummulativecolumns, 'sum')
-                bydays_avg = self._imagecollection_fromlistiteration(averagecolumns, 'mean')
-
-                if averagecolumns is not None:
-                    cummulativecolumns = [x for x in self._bands if not x in averagecolumns]
-                    bydays_cumm = self._imagecollection_fromlistiteration(cummulativecolumns, 'sum')
-                    bydays_avg = self._imagecollection_fromlistiteration(averagecolumns, 'mean')
-'''
-
 
 ### extract data using a gee feature collection
 
+
+def find_duplicatedvaleus(listvalues):
+    """
+    function to identify which indexes are repeated in a list, it returns which values are repeated
+    :param listvalues: list
+    :return: list
+    """
+    listduplicated = []
+    rangefor = range(0,len(listvalues))
+
+    while(len(rangefor)>0):
+        i = rangefor[0]
+        similar = [i]
+
+        for j in rangefor:
+            if listvalues[i] == listvalues[j] and i != j:
+                similar.append(j)
+
+        listduplicated.append(similar)
+        rangefor = [x for x in rangefor if x not in functools.reduce(operator.concat, listduplicated)]
+
+    return listduplicated
 
 def get_coordinates(featurecol):
     """get dates from a feature collection"""
@@ -303,19 +349,35 @@ def imagecollection_fromlistiteration(imagecollection, dates, function):
 
 
 def getfeature_fromeedict(eecollection, attribute, featname):
-    return [eecollection['features'][feature][attribute][featname]
-            for feature in range(len(eecollection['features']))]
-
+    aux = []
+    for feature in range(len(eecollection['features'])):
+        ## get data from the dictionary
+        datadict = eecollection['features'][feature][attribute][featname]
+        ## check if it has info
+        aux.append(datadict)
+    return (aux)
 
 def check_features(featurecoll, featurenames):
     featurenotinlist = []
     for feature in range(len(featurecoll['features'])):
         featurelist = featurecoll['features'][feature]['properties']
+        ## check if all the features were captured by the mission
         difflist = [x for x in featurenames if x not in list(featurelist.keys())[:-1]]
+        ## if there is a feature that was not measured by that date update the dictionary with NA
         if len(difflist) > 0:
-            featurenotinlist.append(difflist)
+            if len(list(featurelist.keys())[:-1]) > 0:
+                for i in difflist:
+                    featurecoll['features'][feature]['properties'].update({i: np.nan})
+            else:
+                for i in featurenames:
+                    featurecoll['features'][feature]['properties'].update({i: np.nan})
 
-    return np.unique(featurenotinlist)
+def check_1feature(featurecoll):
+    for feature in range(len(featurecoll['features'])):
+        featurelist = featurecoll['features'][feature]['properties']
+        ## if there is are no features update a new value with NA
+        if len(list(featurelist.keys())) == 1:
+            featurecoll['features'][feature]['properties'].update({'mean': np.nan})
 
 
 def multiple_eedict_todf(eelistcollection, bands, colname='properties'):
@@ -330,16 +392,15 @@ def fromeedict_todataframe(featurecollection, bands, colname='properties'):
     """get band values from a feature collection"""
 
     listinfo = []
+    ## check if there are empty values in the dictionary
     if len(bands) > 1:
-        notinall = check_features(featurecollection, bands)
-
-        bands = [x for x in bands if x not in notinall]
+        check_features(featurecollection, bands)
+    if len(bands) == 1:
+        check_1feature(featurecollection)
 
     for i in bands:
-
         if len(bands) < 2:
             i = 'mean'
-
         listinfo.append(
             getfeature_fromeedict(featurecollection, colname, i)
         )
@@ -370,7 +431,10 @@ def summarisebydates(image_collection, step, dates, function='mean'):
 def read_pointsas_ee_sp(filename):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
-    sp_features = pd.read_csv(filename)
+    try:
+        sp_features = pd.read_csv(filename)
+    except:
+        sp_features = pd.read_csv(filename, encoding="ISO-8859-1")
     sp_features = organice_coordinates(sp_features)
     return ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
 
