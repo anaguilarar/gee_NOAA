@@ -191,7 +191,7 @@ class gee_weatherdata:
             except:
                 datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0],
                                                                                                   "%Y-%m-%d")
-                step = int(np.ceil(4900 / datedif.days))
+                step = int(np.floor(4900 / datedif.days))
                 print(
                     'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
                     .format(step))
@@ -245,7 +245,7 @@ class gee_weatherdata:
             listdup, featuresred = self._summarisedatafromcheck(imagecoll, ee_sp)
 
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
-            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[0]).advance(150, 'day')).select(self._bands)
+            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[0]).advance(120, 'day')).select(self._bands)
             dataextracted = ee.Image(imagecoll.sum()).reduceRegions(ee_sp, 'mean', 10, crs='EPSG:4326')
             dataextracted = dataextracted.getInfo()
             cummulative_features = getfeature_fromeedict(dataextracted, 'properties', 'mean')
