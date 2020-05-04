@@ -170,6 +170,9 @@ class gee_weatherdata:
 
         return pd.concat(dataextracted)
 
+
+
+
     def CHIRPSdata_asdf(self, by ="days"):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
             try:
@@ -188,11 +191,15 @@ class gee_weatherdata:
             except:
                 datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0],
                                                                                                   "%Y-%m-%d")
-                step = int(np.round(5000 / datedif.days))
+                step = int(np.ceil(4900 / datedif.days))
                 print(
                     'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
                     .format(step))
-                df = self._extract_databypieces(self._bands, step)
+
+                listindex, featuresreduced = self.check_duplicatedvalues()
+
+                df = self._extract_databypieces(self._bands, featuresreduced, step)
+                df = organice_duplicatedf(df, listindex, featuresreduced, self.features)
 
             return df
 
@@ -211,18 +218,7 @@ class gee_weatherdata:
                                                            np.round(self.features.latitude.loc[feature_index], 4)))
             plt.show()
 
-    def check_duplicatedvalues(self):
-        """
-        query data in gee for two dates only, just to check which coordinades share similar data
-        :return:
-        """
-        ee_sp = self._ee_sp
-
-        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
-            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(self._bands), [ee.Date(self._dates[0]),ee.Date(self._dates[0]).advance(1, 'day')], 'mean')
-        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
-            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[1])).select(self._bands)
-
+    def _summarisedatafromcheck(self, imagecoll, ee_sp):
         dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
         dataextracted = dataextracted.flatten().getInfo()
 
@@ -231,9 +227,32 @@ class gee_weatherdata:
         summarised['date'] = date
         summarised = summarised.loc[summarised.date == summarised.date.values[0]]
 
-        listduplicated = find_duplicatedvaleus(summarised[self._bands].mean(axis=1))
-
+        listduplicated = find_duplicatedvalues(summarised[self._bands].mean(axis=1))
         return [listduplicated, self.features.iloc[[x[0] for x in listduplicated]]]
+
+    def check_duplicatedvalues(self):
+        """
+        query data in gee for two dates only, just to check which coordinades share similar data
+        :return:
+        """
+        listdup =None
+        featuresred = None
+        ee_sp = self._ee_sp
+
+        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
+            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(self._bands), [ee.Date(self._dates[0]),ee.Date(self._dates[0]).advance(1, 'day')], 'mean')
+
+            listdup, featuresred = self._summarisedatafromcheck(imagecoll, ee_sp)
+
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[0]).advance(150, 'day')).select(self._bands)
+            dataextracted = ee.Image(imagecoll.sum()).reduceRegions(ee_sp, 'mean', 10, crs='EPSG:4326')
+            dataextracted = dataextracted.getInfo()
+            cummulative_features = getfeature_fromeedict(dataextracted, 'properties', 'mean')
+            listdup = find_duplicatedvalues(cummulative_features)
+            featuresred = self.features.iloc[[x[0] for x in listdup]]
+
+        return [listdup, featuresred]
 
 
 
@@ -243,7 +262,7 @@ class gee_weatherdata:
                        minimumcols=None,
                        maximumcols=None,
                        by="days"):
-        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission =='NASA/GLDAS/V021/NOAH/G025/T3H':
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission =='NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'NOAA/CFSV2/FOR6H':
             '''resume noaa  and gldas data per a specific period'''
 
             ### group data by days
@@ -279,23 +298,7 @@ class gee_weatherdata:
                             summarised = self._extract_databypieces([averagecols, cummulativecols,
                                                                      minimumcols, maximumcols], featuresreduced, step)
 
-                            idcoords = [str(summarised.longitude.values[i]) + str(summarised.latitude.values[i]) for i in
-                                        range(len(summarised.latitude.values))]
-
-                            dataaux = []
-                            for j in range(len(listindex)):
-                                alldata = []
-                                refpos = str(featuresreduced.longitude.values[j]) + str(featuresreduced.latitude.values[j])
-                                pddata = summarised.loc[np.array(idcoords) == refpos]
-                                ### assign values to the repeated features
-                                for i in listindex[j]:
-                                    pddata.longitude = self.features.iloc[i].longitude
-                                    pddata.latitude = self.features.iloc[i].latitude
-                                    alldata.append(pddata)
-
-                                dataaux.append(pd.concat(alldata))
-
-                            summarised = pd.concat(dataaux)
+                            summarised = organice_duplicatedf(summarised, listindex, featuresreduced, self.features)
 
         return summarised
 
@@ -304,7 +307,7 @@ class gee_weatherdata:
 ### extract data using a gee feature collection
 
 
-def find_duplicatedvaleus(listvalues):
+def find_duplicatedvalues(listvalues):
     """
     function to identify which indexes are repeated in a list, it returns which values are repeated
     :param listvalues: list
@@ -434,13 +437,17 @@ def summarisebydates(image_collection, step, dates, function='mean'):
     return resumeddata
 
 
-def read_pointsas_ee_sp(filename):
+def read_pointsas_ee_sp(filename, featurestoselect = None):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
     try:
         sp_features = pd.read_csv(filename)
     except:
         sp_features = pd.read_csv(filename, encoding="ISO-8859-1")
+
+    if featurestoselect is not None:
+        sp_features = sp_features[featurestoselect[0]:featurestoselect[1]]
+
     sp_features = organice_coordinates(sp_features)
     return ee.FeatureCollection([ee.Geometry.Point(sp_features[i]) for i in range(len(sp_features))])
 
@@ -466,3 +473,21 @@ def reduce_region(image, geometry):
     """Spatial aggregation function for a single image and a polygon feature"""
     stat_dict = image.reduceRegions(geometry, 'mean', 10, crs='EPSG:4326');
     return stat_dict.map(lambda y: y.set('date', image.get('system:index')))
+
+def organice_duplicatedf(df, list_index, reduced_features, orig_features):
+    idcoords = [str(df.longitude.values[i]) + str(df.latitude.values[i]) for i in
+                range(len(df.latitude.values))]
+    dataaux = []
+    for j in range(len(list_index)):
+        alldata = []
+        refpos = str(reduced_features.longitude.values[j]) + str(reduced_features.latitude.values[j])
+        pddata = df.loc[np.array(idcoords) == refpos]
+        ### assign values to the repeated features
+        for i in list_index[j]:
+            pddata.longitude = orig_features.iloc[i].longitude
+            pddata.latitude = orig_features.iloc[i].latitude
+            alldata.append(pddata)
+
+        dataaux.append(pd.concat(alldata))
+
+    return pd.concat(dataaux)
