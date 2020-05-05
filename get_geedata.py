@@ -484,9 +484,10 @@ def organice_duplicatedf(df, list_index, reduced_features, orig_features):
         pddata = df.loc[np.array(idcoords) == refpos]
         ### assign values to the repeated features
         for i in list_index[j]:
-            pddata.longitude = orig_features.iloc[i].longitude
-            pddata.latitude = orig_features.iloc[i].latitude
-            alldata.append(pddata)
+            copypddata = pddata.copy()
+            copypddata.longitude = orig_features.iloc[i].longitude
+            copypddata.latitude = orig_features.iloc[i].latitude
+            alldata.append(copypddata)
 
         dataaux.append(pd.concat(alldata))
 
