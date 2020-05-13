@@ -31,6 +31,14 @@ GLDA_bands = ['AvgSurfT_inst',
               'Psurf_f_inst',
               'Rainf_f_tavg']
 
+DAYMET_bands = ['dayl',
+              'prcp',
+              'srad',
+              'swe',
+              'tmax',
+              'tmin',
+              'vp']
+
 
 
 class gee_weatherdata:
@@ -58,6 +66,7 @@ class gee_weatherdata:
                    id reference to the stallite which will be processed:
                        - NOAA: "noaa"
                        - CHIRPS: "chirsp"
+                       - DAYMET: "daymet"
 
            Attributes
            ----------
@@ -85,6 +94,9 @@ class gee_weatherdata:
         if mission == 'chirps':
             self._mission = 'UCSB-CHG/CHIRPS/DAILY'
             self._bands = ["precipitation"]
+        if mission == 'daymet':
+            self._mission = 'NASA/ORNL/DAYMET_V3'
+            self._bands = DAYMET_bands
 
         self._dates = [start_date, end_date]
         ## get spatial points
@@ -98,7 +110,7 @@ class gee_weatherdata:
 
     def _extract_multifunction(self, ee_sp, bands):
 
-        if len(bands) == 4:
+        if len(bands) == 4 and self._mission is not 'NASA/ORNL/DAYMET_V3':
             avgdata = self._extract_data(bands[0], ee_sp)
             dfavgdata = fromeedict_todataframe(avgdata, bands[0])
             print('average features processed')
@@ -128,6 +140,9 @@ class gee_weatherdata:
             imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates, function)
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
+        if self._mission == 'NASA/ORNL/DAYMET_V3':
+            imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
+
 
         dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
         dataextracted = dataextracted.flatten().getInfo()
@@ -143,7 +158,8 @@ class gee_weatherdata:
             dates = date.apply(lambda x:
                                             dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
                                                                                              '%Y-%m-%d'))
-        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+            
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission == 'NASA/ORNL/DAYMET_V3':
             dates = date
 
         coords = pd.DataFrame(getfeature_fromeedict(geedict, 'geometry', 'coordinates'),
@@ -199,6 +215,42 @@ class gee_weatherdata:
                 listindex, featuresreduced = self.check_duplicatedvalues()
 
                 df = self._extract_databypieces(self._bands, featuresreduced, step)
+                df = organice_duplicatedf(df, listindex, featuresreduced, self.features)
+
+            return df
+
+    def DAYMETdata_asdf(self, bands = None):
+        if self._mission == 'NASA/ORNL/DAYMET_V3':
+            try:
+                if bands is None:
+                    bands = self._bands
+
+                dataperday = self._extract_data(bands, self._ee_sp)
+
+                date = pd.Series(getfeature_fromeedict(dataperday, 'properties', 'date'))
+
+                coords = pd.DataFrame(getfeature_fromeedict(dataperday, 'geometry', 'coordinates'),
+                                      columns=['longitude', 'latitude'])
+
+                df = fromeedict_todataframe(dataperday, self._bands)
+                df['date'] = date.apply(lambda date_i:
+                                        dt.datetime.strptime(date_i, '%Y%m%d'))
+                df = pd.concat([df, coords], axis=1)
+
+            except:
+                datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0],
+                                                                                                  "%Y-%m-%d")
+                step = int(np.floor(4900 / datedif.days))
+                print(
+                    'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
+                    .format(step))
+
+                listindex, featuresreduced = self.check_duplicatedvalues()
+
+                if bands is None:
+                    bands = self._bands
+
+                df = self._extract_databypieces(bands, featuresreduced, step)
                 df = organice_duplicatedf(df, listindex, featuresreduced, self.features)
 
             return df
