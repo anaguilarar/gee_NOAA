@@ -158,7 +158,7 @@ class gee_weatherdata:
             dates = date.apply(lambda x:
                                             dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
                                                                                              '%Y-%m-%d'))
-            
+
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission == 'NASA/ORNL/DAYMET_V3':
             dates = date
 
