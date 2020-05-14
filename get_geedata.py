@@ -37,7 +37,7 @@ DAYMET_bands = ['dayl',
               'swe',
               'tmax',
               'tmin',
-              'vp']
+                'vp']
 
 
 
@@ -81,7 +81,8 @@ class gee_weatherdata:
     def __init__(self, start_date,
                  end_date,
                  roi_filename,
-                 mission):
+                 mission,
+                 bands = None):
 
         ### mission reference setting
 
@@ -219,7 +220,7 @@ class gee_weatherdata:
 
             return df
 
-    def DAYMETdata_asdf(self, bands = None):
+    def DAYMETdata_asdf(self, bands= None):
         if self._mission == 'NASA/ORNL/DAYMET_V3':
             try:
                 if bands is None:
@@ -296,12 +297,22 @@ class gee_weatherdata:
 
             listdup, featuresred = self._summarisedatafromcheck(imagecoll, ee_sp)
 
-        if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
+        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission == 'NASA/ORNL/DAYMET_V3':
+
             imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[0]).advance(120, 'day')).select(self._bands)
             dataextracted = ee.Image(imagecoll.sum()).reduceRegions(ee_sp, 'mean', 10, crs='EPSG:4326')
             dataextracted = dataextracted.getInfo()
-            cummulative_features = getfeature_fromeedict(dataextracted, 'properties', 'mean')
+            if len(self._bands)>1:
+                listbandsinfo = []
+                for band in self._bands:
+                    listbandsinfo.append(getfeature_fromeedict(dataextracted, 'properties', band))
+                datatocompare = pd.DataFrame(listbandsinfo).transpose()
+                cummulative_features = datatocompare.apply(np.mean, axis=1)
+            else:
+                cummulative_features = getfeature_fromeedict(dataextracted, 'properties', 'mean')
+            print("Calculating which features share similar data")
             listdup = find_duplicatedvalues(cummulative_features)
+            print("{} pixels wrap the total information".format(len(listdup)))
             featuresred = self.features.iloc[[x[0] for x in listdup]]
 
         return [listdup, featuresred]
@@ -365,19 +376,25 @@ def find_duplicatedvalues(listvalues):
     :param listvalues: list
     :return: list
     """
+    dataframe = pd.DataFrame({'val': listvalues})
+    # dataframe = dataframe.sort_values(by='val')
+
+    rangefor = dataframe.index
     listduplicated = []
-    rangefor = range(0,len(listvalues))
 
-    while(len(rangefor)>0):
+    while (len(rangefor) > 0):
+
         i = rangefor[0]
-        similar = [i]
 
+        similar = [i]
+        dataframe = dataframe.drop(i)
         for j in rangefor:
             if listvalues[i] == listvalues[j] and i != j:
                 similar.append(j)
+                dataframe = dataframe.drop(j)
 
         listduplicated.append(similar)
-        rangefor = [x for x in rangefor if x not in functools.reduce(operator.concat, listduplicated)]
+        rangefor = dataframe.index
 
     return listduplicated
 
