@@ -64,7 +64,7 @@ class gee_weatherdata:
 
            mission : str
                    id reference to the stallite which will be processed:
-                       - NOAA: "noaa"
+                       - CVS V2: "cfs"
                        - CHIRPS: "chirsp"
                        - DAYMET: "daymet"
 
@@ -86,7 +86,7 @@ class gee_weatherdata:
 
         ### mission reference setting
 
-        if mission == "noaa":
+        if mission == "cfs":
             self._mission = 'NOAA/CFSV2/FOR6H'
             self._bands = NOAA_bands
         if mission == 'gldas':
@@ -326,7 +326,7 @@ class gee_weatherdata:
                        maximumcols=None,
                        by="days"):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission =='NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'NOAA/CFSV2/FOR6H':
-            '''resume noaa  and gldas data per a specific period'''
+            '''resume cfs  and gldas data per a specific period'''
 
             ### group data by days
             ##TODO: create monthly and yearly module
@@ -336,7 +336,11 @@ class gee_weatherdata:
             if by == "days":
                 if cummulativecols is None and averagecols is None and minimumcols is None and maximumcols is None:
                     ee_sp = self._ee_sp
-                    summarised = self._extract_multifunction(ee_sp, self._bands)
+                    summarised, eedict = self._extract_multifunction(ee_sp, self._bands)
+                    date, coordinates = self._get_dates_coordinatesfromee(eedict)
+                    summarised['date'] = date
+                    summarised = pd.concat([summarised, coordinates], axis=1)
+
 
                 else:
                     if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
