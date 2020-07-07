@@ -1,5 +1,7 @@
 # Descarga de datos clima usando GEE 
+<p align="center">
 <img src="https://ciat.cgiar.org/wp-content/uploads/Alliance_logo.png" alt="CIAT" id="logo" data-height-percentage="90" data-actual-width="140" data-actual-height="55">
+</p>
 
 ## 1. Propósito
 
@@ -22,9 +24,8 @@ El propósito de este código es poder realizar la consulta y descarga de datos 
 ## 4. Requisitos
 
   1. python 3.6, 3.7
-  2. Google earth Engine API
-  3. Un archivo CSV el cual disponga de las coordenadas para cada punto de interés.
-  4. En cuanto a librerias, se recomiendan las siguientes:
+  2. Un archivo CSV el cual disponga de las coordenadas para cada punto de interés (ver el [ejemplo](https://github.com/anaguilarar/gee_NOAA/blob/master/data/truestationlocation.csv)).
+  3. En cuanto a librerias, se recomiendan las siguientes:
   ```txt
   earthengine_api==0.1.211
 numpy==1.18.5
