@@ -1,0 +1,9 @@
+earthengine_api==0.1.211
+numpy==1.18.5
+wget==3.2
+folium==0.11.0
+geehydro==0.2.0
+pandas==1.0.5
+ee==0.4
+geopandas==0.8.0
+Shapely==1.7.0
