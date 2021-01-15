@@ -32,26 +32,27 @@ GLDA_bands = ['AvgSurfT_inst',
               'Rainf_f_tavg']
 
 DAYMET_bands = ['dayl',
-              'prcp',
-              'srad',
-              'swe',
-              'tmax',
-              'tmin',
+                'prcp',
+                'srad',
+                'swe',
+                'tmax',
+                'tmin',
                 'vp']
 
 ERA5_bands = ['mean_2m_air_temperature',
-            'minimum_2m_air_temperature',
-            'maximum_2m_air_temperature',
-            'dewpoint_2m_temperature',
-            'total_precipitation',
-            'surface_pressure',
-            'u_component_of_wind_10m',
-            'v_component_of_wind_10m'
-]
+              'minimum_2m_air_temperature',
+              'maximum_2m_air_temperature',
+              'dewpoint_2m_temperature',
+              'total_precipitation',
+              'surface_pressure',
+              'u_component_of_wind_10m',
+              'v_component_of_wind_10m'
+              ]
 
 TRMM_bands = ['precipitation',
               'relativeError',
               'satPrecipitationSource']
+
 
 class gee_weatherdata:
     """Download weathaer data from the Google Earth Engine platform.
@@ -97,7 +98,7 @@ class gee_weatherdata:
                  end_date,
                  roi_filename,
                  mission,
-                 bands = None):
+                 bands=None):
 
         ### mission reference setting
 
@@ -129,40 +130,38 @@ class gee_weatherdata:
                                                        ee.Date(end_date).advance(1, 'day'),
                                                        self._mission,
                                                        self._ee_sp)
-    
-    def _extract_multifunction(self, ee_sp, bands, summaryfuns = []):
 
+    def _extract_multifunction(self, ee_sp, bands, summaryfuns=[]):
+        band_time_reduced = np.nan
+        datasummarised = pd.DataFrame()
         if len(summaryfuns) > 1:
-            avgdata = self._extract_data(bands[0], ee_sp)
             multiple_bands = []
             for i, j in zip(bands, summaryfuns):
                 band_time_reduced = self._extract_data(i, ee_sp, j)
                 multiple_bands.append(fromeedict_todataframe(band_time_reduced, i))
                 print('{} features processed'.format(j))
+
             datasummarised = pd.concat(multiple_bands, axis=1)
 
         else:
             if len(summaryfuns) == 1:
-                avgdata = self._extract_data(bands[0], ee_sp)
                 band_time_reduced = self._extract_data(bands[0], ee_sp, summaryfuns[0])
-                datasummarised = fromeedict_todataframe(band_time_reduced,bands[0])
+                datasummarised = fromeedict_todataframe(band_time_reduced, bands[0])
+                print('{} features processed'.format(summaryfuns[0]))
             elif len(summaryfuns) == 0:
-                avgdata = self._extract_data(bands, ee_sp)
-                datasummarised = fromeedict_todataframe(avgdata, bands)
+                band_time_reduced = self._extract_data(bands, ee_sp)
+                datasummarised = fromeedict_todataframe(band_time_reduced, bands)
 
-        return [datasummarised, avgdata]
+        return [datasummarised, band_time_reduced]
 
     def _extract_data(self, bands, ee_sp, function='mean'):
 
-        if self._mission == 'NOAA/CFSV2/FOR6H':
+        if (self._mission == 'NOAA/CFSV2/FOR6H' or
+                self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or
+                self._mission == 'TRMM/3B42'):
             imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates,
                                                           function)
-        if self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H':
-            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates,
-                                                          function)
-        if self._mission == 'TRMM/3B42':
-            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(bands), self._dates,
-                                                              function)
+
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
         if self._mission == 'NASA/ORNL/DAYMET_V3':
@@ -170,6 +169,22 @@ class gee_weatherdata:
         if self._mission == 'ECMWF/ERA5/DAILY':
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
 
+
+        ### remove those images with no data
+        listdates = []
+        collectiondict = imagecoll.getInfo()
+        for feature in range(len(collectiondict['features'])):
+            datadict = collectiondict['features'][feature]['bands']
+            if len(datadict) == 0:
+                listdates.append(collectiondict['features'][feature]['properties']
+                                 ['system:index'])
+
+        if len(listdates) > 0:
+            imagecoll = imagecoll.filter(ee.Filter.inList('system:index', ee.List(listdates)).Not())
+
+        #sizeimagecollection = imagecoll.size().getInfo()
+        #if (sizeimagecollection) == 0:
+        #    raise NameError('there is no Data for quering dates, check out another period')
 
         dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
         dataextracted = dataextracted.flatten().getInfo()
@@ -181,10 +196,12 @@ class gee_weatherdata:
         date = pd.Series(
             getfeature_fromeedict(geedict, 'properties', 'date'))
 
-        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'TRMM/3B42':
+        if (self._mission == 'NOAA/CFSV2/FOR6H' or
+                self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or
+                self._mission == 'TRMM/3B42'):
             dates = date.apply(lambda x:
-                                            dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
-                                                                                             '%Y-%m-%d'))
+                               dt.timedelta(days=int(x)) + dt.datetime.strptime(self._dates[0],
+                                                                                '%Y-%m-%d'))
 
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission == 'NASA/ORNL/DAYMET_V3' or self._mission == 'ECMWF/ERA5/DAILY':
             dates = date
@@ -194,7 +211,7 @@ class gee_weatherdata:
 
         return [dates, coords]
 
-    def _extract_databypieces(self,  bands, features, steps=2, summaryfun = []):
+    def _extract_databypieces(self, bands, features, steps=2, summaryfun=[]):
 
         dataextracted = []
 
@@ -212,9 +229,6 @@ class gee_weatherdata:
             print("Points from {0} to {1} were extracted".format(spoint, (spoint + steps) - 1))
 
         return pd.concat(dataextracted)
-
-
-
 
     def CHIRPSdata_asdf(self):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
@@ -237,7 +251,7 @@ class gee_weatherdata:
                 step = int(np.floor(4900 / datedif.days))
                 print(
                     'an exception was generated, query aborted after accumulating over 5000 elements, running by {} features'
-                    .format(step))
+                        .format(step))
 
                 listindex, featuresreduced = self.check_duplicatedvalues()
 
@@ -246,7 +260,7 @@ class gee_weatherdata:
 
             return df
 
-    def DAYMETdata_asdf(self, bands= None):
+    def DAYMETdata_asdf(self, bands=None):
         if self._mission == 'NASA/ORNL/DAYMET_V3':
             try:
                 if bands is None:
@@ -270,7 +284,7 @@ class gee_weatherdata:
                 step = int(np.floor(4900 / datedif.days))
                 print(
                     'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
-                    .format(step))
+                        .format(step))
 
                 listindex, featuresreduced = self.check_duplicatedvalues()
 
@@ -282,7 +296,7 @@ class gee_weatherdata:
 
             return df
 
-    def ERA5data_asdf(self, bands= None):
+    def ERA5data_asdf(self, bands=None):
         if self._mission == 'ECMWF/ERA5/DAILY':
             try:
                 if bands is None:
@@ -306,7 +320,7 @@ class gee_weatherdata:
                 step = int(np.floor(4900 / datedif.days))
                 print(
                     'an exception was genereted, query aborted after accumulating over 5000 elements, running by {} features'
-                    .format(step))
+                        .format(step))
 
                 listindex, featuresreduced = self.check_duplicatedvalues()
 
@@ -320,7 +334,6 @@ class gee_weatherdata:
 
     def plot_CHIRPS(self, feature_index=1, fig_size=[12, 5]):
         if self._mission == 'UCSB-CHG/CHIRPS/DAILY':
-
             ref_long = self.features.longitude.loc[feature_index - 1]
             plotdata = self.CHIRPSdata_asdf()
             plotdata = plotdata.loc[np.round(plotdata.longitude, 5) == np.round(ref_long, 5)]
@@ -350,23 +363,31 @@ class gee_weatherdata:
         query data in gee for two dates only, just to check which coordinades share similar data
         :return:
         """
-        listdup =None
+        listdup = None
         featuresred = None
         ee_sp = self._ee_sp
 
-        if self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'TRMM/3B42':
-            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(self._bands), [ee.Date(self._dates[0]),ee.Date(self._dates[0]).advance(1, 'day')], 'mean')
+        if (self._mission == 'NOAA/CFSV2/FOR6H' or
+                self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or
+                self._mission == 'TRMM/3B42'):
+            imagecoll = imagecollection_fromlistiteration(self.image_collection.select(self._bands),
+                                                          [ee.Date(self._dates[0]),
+                                                           ee.Date(self._dates[0]).advance(1, 'day')], 'mean')
 
             listdup, featuresred = self._summarisedatafromcheck(imagecoll, ee_sp)
             print("{} pixels wrap the total information".format(len(listdup)))
 
-        if self._mission == 'UCSB-CHG/CHIRPS/DAILY' or self._mission == 'NASA/ORNL/DAYMET_V3' or self._mission == 'ECMWF/ERA5/DAILY':
+        if (self._mission == 'UCSB-CHG/CHIRPS/DAILY' or
+                self._mission == 'NASA/ORNL/DAYMET_V3' or
+                self._mission == 'ECMWF/ERA5/DAILY'):
 
-            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]), ee.Date(self._dates[0]).advance(120, 'day')).select(self._bands)
+            imagecoll = self.image_collection.filterDate(ee.Date(self._dates[0]),
+                                                         ee.Date(self._dates[0]).advance(120, 'day')).select(
+                self._bands)
             dataextracted = ee.Image(imagecoll.sum()).reduceRegions(ee_sp, 'mean', 10, crs='EPSG:4326')
             dataextracted = dataextracted.getInfo()
-            
-            if len(self._bands)>1:
+
+            if len(self._bands) > 1:
                 listbandsinfo = []
                 for band in self._bands:
                     listbandsinfo.append(getfeature_fromeedict(dataextracted, 'properties', band))
@@ -382,14 +403,12 @@ class gee_weatherdata:
 
         return [listdup, featuresred]
 
-
-
     def summarise_hourlydata(self,
-                       average_bands=None,
-                       cummulative_bands=None,
-                       minimum_bands=None,
-                       maximum_bands=None,
-                       by="days"):
+                             average_bands=None,
+                             cummulative_bands=None,
+                             minimum_bands=None,
+                             maximum_bands=None,
+                             by="days"):
 
         """Reduce a collection based on a time window.
                 Args:
@@ -405,14 +424,14 @@ class gee_weatherdata:
                 """
 
         summarised = np.nan
-        if self._mission =='NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'TRMM/3B42':
+        if self._mission == 'NASA/GLDAS/V021/NOAH/G025/T3H' or self._mission == 'NOAA/CFSV2/FOR6H' or self._mission == 'TRMM/3B42':
 
             va_functions = ["mean", "sum", "min", "max"]
             list_var = [average_bands,
-                       cummulative_bands,
-                       minimum_bands,
-                       maximum_bands]
-            var_filter= np.logical_not(pd.isnull(list_var))
+                        cummulative_bands,
+                        minimum_bands,
+                        maximum_bands]
+            var_filter = np.logical_not(pd.isnull(list_var))
 
             def_functions = np.array(va_functions)[var_filter]
             def_variables = np.array(list_var)[var_filter]
@@ -433,7 +452,7 @@ class gee_weatherdata:
                 else:
 
                     if len(def_variables) >= 1:
-                    #if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
+                        # if cummulativecols is not None and averagecols is not None and minimumcols is not None and maximumcols is not None:
                         try:
                             ee_sp = self._ee_sp
                             summarised, eedict = self._extract_multifunction(ee_sp, def_variables, def_functions)
@@ -444,16 +463,17 @@ class gee_weatherdata:
                         except:
                             ### Looking for those points that have repeated information
                             listindex, featuresreduced = self.check_duplicatedvalues()
-                            datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(self._dates[0], "%Y-%m-%d")
+                            datedif = dt.datetime.strptime(self._dates[1], "%Y-%m-%d") - dt.datetime.strptime(
+                                self._dates[0], "%Y-%m-%d")
                             step = int(np.floor(4900 / datedif.days))
 
-                            print('generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
-                                  .format(step))
+                            print(
+                                'generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
+                                .format(step))
                             summarised = self._extract_databypieces(def_variables, featuresreduced, step, def_functions)
                             summarised = organice_duplicatedf(summarised, listindex, featuresreduced, self.features)
 
         return summarised
-
 
 
 ### extract data using a gee feature collection
@@ -486,6 +506,7 @@ def find_duplicatedvalues(listvalues):
         rangefor = dataframe.index
 
     return listduplicated
+
 
 def get_coordinates(featurecol):
     """get dates from a feature collection"""
@@ -528,6 +549,7 @@ def getfeature_fromeedict(eecollection, attribute, featname):
         aux.append(datadict)
     return (aux)
 
+
 def check_features(featurecoll, featurenames):
     featurenotinlist = []
     for feature in range(len(featurecoll['features'])):
@@ -542,6 +564,7 @@ def check_features(featurecoll, featurenames):
             else:
                 for i in featurenames:
                     featurecoll['features'][feature]['properties'].update({i: np.nan})
+
 
 def check_1feature(featurecoll):
     for feature in range(len(featurecoll['features'])):
@@ -599,7 +622,7 @@ def summarisebydates(image_collection, step, dates, function='mean'):
     return resumeddata
 
 
-def read_pointsas_ee_sp(filename, featurestoselect = None):
+def read_pointsas_ee_sp(filename, featurestoselect=None):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
     try:
@@ -633,8 +656,9 @@ def organice_coordinates(dataframe, longcolname="longitude", latcolname="latitud
 
 def reduce_region(image, geometry):
     """Spatial aggregation function for a single image and a polygon feature"""
-    stat_dict = image.reduceRegions(geometry, 'mean', 10, crs='EPSG:4326');
+    stat_dict = image.reduceRegions(geometry, 'mean', 10, crs='EPSG:4326')
     return stat_dict.map(lambda y: y.set('date', image.get('system:index')))
+
 
 def organice_duplicatedf(df, list_index, reduced_features, orig_features):
     idcoords = [str(df.longitude.values[i]) + str(df.latitude.values[i]) for i in
