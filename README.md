@@ -20,6 +20,7 @@ El propósito de este código es poder realizar la consulta y descarga de datos 
 * [CHIRPS](https://developers.google.com/earth-engine/datasets/catalog/UCSB-CHG_CHIRPS_DAILY)
 * [DAYMET](https://developers.google.com/earth-engine/datasets/catalog/NASA_ORNL_DAYMET_V3)
 * [ERA5](https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_DAILY)
+* [TRMM](https://developers.google.com/earth-engine/datasets/catalog/TRMM_3B42?hl=en)
 
 ## 4. Requisitos
 
@@ -42,7 +43,7 @@ Shapely==1.7.0
 
 El siguiente ejemplo muestra como visualizar y descargar datos diarios de precipitación de la misión CHIRPS. Para más ejemplos por favor dirigirse a el notebook [Descargar clima de GEE](https://github.com/anaguilarar/gee_NOAA/blob/master/Descargar%20clima%20de%20GEE.ipynb).
 
-Para poder realizar la consulta inicial de la información, es necesario especificar el tiempo, la región de interés y la misión. Para el tiempo se señala la fecha inicial y final; en cuanto a la región, se indica la ruta del archivo csv; por último, se indica cual de los siguientes nombres corresponde a la misión de interés: "cfs", "gldas", "chirsp", "daymet" y "era5"
+Para poder realizar la consulta inicial de la información, es necesario especificar el tiempo, la región de interés y la misión. Para el tiempo se señala la fecha inicial y final; en cuanto a la región, se indica la ruta del archivo csv; por último, se indica cual de los siguientes nombres corresponde a la misión de interés: "cfs", "gldas", "chirsp", "daymet", "era5" o "trmm"
 
 ```python
 ### importando el script
