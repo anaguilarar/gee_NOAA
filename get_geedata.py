@@ -169,7 +169,6 @@ class gee_weatherdata:
         if self._mission == 'ECMWF/ERA5/DAILY':
             imagecoll = self.image_collection.filterDate(self._dates[0], self._dates[1]).select(bands)
 
-
         ### remove those images with no data
         listdates = []
         collectiondict = imagecoll.getInfo()
@@ -182,8 +181,8 @@ class gee_weatherdata:
         if len(listdates) > 0:
             imagecoll = imagecoll.filter(ee.Filter.inList('system:index', ee.List(listdates)).Not())
 
-        #sizeimagecollection = imagecoll.size().getInfo()
-        #if (sizeimagecollection) == 0:
+        # sizeimagecollection = imagecoll.size().getInfo()
+        # if (sizeimagecollection) == 0:
         #    raise NameError('there is no Data for quering dates, check out another period')
 
         dataextracted = imagecoll.map(lambda x: reduce_region(x, ee_sp))
@@ -469,7 +468,7 @@ class gee_weatherdata:
 
                             print(
                                 'generated an exception, query aborted after accumulating over 5000 elements, running by {} features'
-                                .format(step))
+                                    .format(step))
                             summarised = self._extract_databypieces(def_variables, featuresreduced, step, def_functions)
                             summarised = organice_duplicatedf(summarised, listindex, featuresreduced, self.features)
 
@@ -625,10 +624,15 @@ def summarisebydates(image_collection, step, dates, function='mean'):
 def read_pointsas_ee_sp(filename, featurestoselect=None):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
-    try:
-        sp_features = pd.read_csv(filename)
-    except:
-        sp_features = pd.read_csv(filename, encoding="ISO-8859-1")
+
+    if str(type(filename)) == "<class 'str'>":
+        try:
+            sp_features = pd.read_csv(filename)
+        except:
+            sp_features = pd.read_csv(filename, encoding="ISO-8859-1")
+
+    else:
+        sp_features = filename.copy()
 
     if featurestoselect is not None:
         sp_features = sp_features[featurestoselect[0]:featurestoselect[1]]
@@ -640,7 +644,14 @@ def read_pointsas_ee_sp(filename, featurestoselect=None):
 def read_pointsas_df(filename, colnames=["longitude", "latitude"]):
     '''organice coordinates as gee spatial feature collection'''
     ### read csv file
-    sp_features = pd.read_csv(filename)
+    if str(type(filename)) == "<class 'str'>":
+        try:
+            sp_features = pd.read_csv(filename)
+        except:
+            sp_features = pd.read_csv(filename, encoding="ISO-8859-1")
+    else:
+        sp_features = filename.copy()
+
     sp_features = organice_coordinates(sp_features)
     sp_df = pd.DataFrame(sp_features, columns=colnames)
     sp_df['index'] = [i + 1 for i in range(len(sp_features))]
